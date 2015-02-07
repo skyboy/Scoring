@@ -83,6 +83,7 @@ public class Scoring {
 			else
 				log.warn("item_values entry %s not found", e.getKey());
 		}
+		config.save();
 	}
 
 	@EventHandler
