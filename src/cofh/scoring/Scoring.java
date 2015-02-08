@@ -35,17 +35,27 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map.Entry;
 
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGameOver;
+import net.minecraft.client.gui.GuiIngame;
+import net.minecraft.client.gui.GuiPlayerInfo;
+import net.minecraft.client.network.NetHandlerPlayClient;
 import net.minecraft.entity.EntityList;
 import net.minecraft.entity.item.EntityItem;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.item.Item;
+import net.minecraft.scoreboard.ScoreDummyCriteria;
+import net.minecraft.scoreboard.ScoreObjective;
 import net.minecraft.scoreboard.ScorePlayerTeam;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.stats.StatList;
 import net.minecraft.util.DamageSource;
+import net.minecraft.util.EnumChatFormatting;
 import net.minecraftforge.client.event.GuiOpenEvent;
+import net.minecraftforge.client.event.RenderGameOverlayEvent;
+import net.minecraftforge.client.event.RenderGameOverlayEvent.ElementType;
 import net.minecraftforge.common.DimensionManager;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.config.ConfigCategory;
@@ -56,19 +66,23 @@ import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.player.PlayerDestroyItemEvent;
 
 import org.apache.logging.log4j.Logger;
+import org.lwjgl.opengl.GL11;
 
 @Mod(modid = "CoFHScoring", name = "Scoring", version = "0.0.1.0", dependencies = "")
 public class Scoring {
 
 	private static String sep = System.getProperty("line.separator");
 	public static long playerScore = 0;
-	Logger log;
-	Configuration config;
 	static TObjectLongHashMap<String> score = new TObjectLongHashMap<String>();
+	static TObjectLongHashMap<String> scoreCache = new TObjectLongHashMap<String>();
 	static TObjectLongHashMap<Item> values = new TObjectLongHashMap<Item>(8, 0.5f, 0L);
 	static ArrayList<String> bossEntities = new ArrayList<String>();
 	static long serverTickTime, timeMod;
 	static boolean complete;
+	static boolean drawInList, clientDraw;
+	static ScoreObjective dummyObjective;
+	Logger log;
+	Configuration config;
 	File scoreData;
 	SimpleNetworkWrapper networkWrapper;
 
@@ -87,6 +101,8 @@ public class Scoring {
 
 		String comment = "1 point is subtracted from a player's score every this many ticks (default: 10 minutes (20*60*10))";
 		timeMod = config.get("general", "TimeCost", 20 * 60 * 10, comment + ". 0 disables.").getInt() & 0xFFFFFFFFL;
+
+		drawInList = config.get("general", "DrawScoreInPlayerList", true).getBoolean();
 
 		networkWrapper = new SimpleNetworkWrapper("CoFH|Scoring");
 		networkWrapper.registerMessage(ClientPacketHandler.class, Message.class, 0, Side.CLIENT);
@@ -195,7 +211,15 @@ public class Scoring {
 	@SubscribeEvent
 	public void playerLoggedIn(PlayerLoggedInEvent evt) {
 
-		networkWrapper.sendTo(new Message(1, complete ? 1 : 0), (EntityPlayerMP) evt.player);
+		EntityPlayerMP player = (EntityPlayerMP) evt.player;
+		networkWrapper.sendTo(new Message(1, complete ? 1 : 0), player);
+		networkWrapper.sendTo(new Message(3, drawInList ? 1 : 0), player);
+		score.putIfAbsent(player.getCommandSenderName(), 0);
+		if (drawInList) {
+			for (String k : score.keySet()) {
+				networkWrapper.sendTo(new Message(2, k, score.get(k)), player);
+			}
+		}
 	}
 
 	@SubscribeEvent
@@ -204,14 +228,19 @@ public class Scoring {
 		if (!complete && evt.phase == Phase.END)
 			if (++serverTickTime % 900 == 0)
 				serverStopped(null);
+			else if (drawInList && serverTickTime % (20 * 7) == 0)
+				for (String k : score.keySet()) {
+					long data = score.get(k);
+					if (scoreCache.put(k, data) != data) {
+						sendPlayersMessage(new Message(2, k, data));
+					}
+				}
 	}
 
-	@SubscribeEvent
-	@SideOnly(Side.CLIENT)
-	public void openGui(GuiOpenEvent evt) {
-
-		if (evt.gui instanceof GuiGameOver)
-			evt.gui = new cofh.scoring.GuiGameOver();
+	private void sendPlayersMessage(Message msg) {
+		for (EntityPlayerMP player : (List<EntityPlayerMP>) MinecraftServer.getServer().getConfigurationManager().playerEntityList) {
+			networkWrapper.sendTo(msg, player);
+		}
 	}
 
 	@SubscribeEvent(priority = EventPriority.LOWEST)
@@ -275,6 +304,89 @@ public class Scoring {
 		return;
 	}
 
+	@SubscribeEvent
+	@SideOnly(Side.CLIENT)
+	public void openGui(GuiOpenEvent evt) {
+
+		if (evt.gui instanceof GuiGameOver)
+			evt.gui = new cofh.scoring.GuiGameOver();
+	}
+
+	@SubscribeEvent
+	@SideOnly(Side.CLIENT)
+	public void drawOverlay(RenderGameOverlayEvent.Pre evt) {
+
+		if (!clientDraw)
+			return;
+		Minecraft mc = Minecraft.getMinecraft();
+		if (dummyObjective == null || dummyObjective.getScoreboard() != mc.theWorld.getScoreboard())
+			dummyObjective = new ScoreObjective(mc.theWorld.getScoreboard(), "nil", new ScoreDummyCriteria("nil"));
+		mc.theWorld.getScoreboard().func_96530_a(0, dummyObjective);
+		if (evt.type == ElementType.PLAYER_LIST) {
+			evt.setCanceled(true);
+			GuiIngame gui = mc.ingameGUI;
+			NetHandlerPlayClient handler = mc.thePlayer.sendQueue;
+			mc.mcProfiler.startSection("playerList");
+			@SuppressWarnings("unchecked")
+			List<GuiPlayerInfo> players = handler.playerInfoList;
+			int maxPlayers = handler.currentServerMaxPlayers;
+			int rows = maxPlayers;
+			int columns = 1;
+
+			for (columns = 1; rows > 20; rows = (maxPlayers + columns - 1) / columns) {
+				columns++;
+			}
+
+			int columnWidth = 300 / columns;
+
+			if (columnWidth > 150) {
+				columnWidth = 150;
+			}
+
+			int left = (evt.resolution.getScaledWidth() - columns * columnWidth) / 2;
+			byte border = 10;
+			Gui.drawRect(left - 1, border - 1, left + columnWidth * columns, border + 9 * rows, Integer.MIN_VALUE);
+
+			for (int i = 0; i < maxPlayers; i++) {
+				int xPos = left + i % columns * columnWidth;
+				int yPos = border + i / columns * 9;
+				Gui.drawRect(xPos, yPos, xPos + columnWidth - 1, yPos + 8, 553648127);
+				GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
+				GL11.glEnable(GL11.GL_ALPHA_TEST);
+
+				if (i < players.size()) {
+					GuiPlayerInfo player = players.get(i);
+					ScorePlayerTeam team = mc.theWorld.getScoreboard().getPlayersTeam(player.name);
+					String displayName = ScorePlayerTeam.formatPlayerName(team, player.name);
+					mc.fontRenderer.drawStringWithShadow(displayName, xPos, yPos, 16777215);
+
+					int endX = xPos + mc.fontRenderer.getStringWidth(displayName) + 5;
+					int maxX = xPos + columnWidth - 12 - 5;
+
+					if (maxX - endX > 5) {
+						String scoreDisplay = EnumChatFormatting.YELLOW + "" + score.get(player.name);
+						mc.fontRenderer.drawStringWithShadow(scoreDisplay, maxX - mc.fontRenderer.getStringWidth(scoreDisplay), yPos, 16777215);
+					}
+
+					GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
+
+					mc.getTextureManager().bindTexture(Gui.icons);
+					int pingIndex = 4;
+					int ping = player.responseTime;
+					if (ping < 0) pingIndex = 5;
+					else if (ping < 150) pingIndex = 0;
+					else if (ping < 300) pingIndex = 1;
+					else if (ping < 600) pingIndex = 2;
+					else if (ping < 1000) pingIndex = 3;
+
+					gui.zLevel += 100.0F;
+					gui.drawTexturedModalRect(xPos + columnWidth - 12, yPos, 0, 176 + pingIndex * 8, 10, 8);
+					gui.zLevel -= 100.0F;
+				}
+			}
+		}
+	}
+
 	public static class ClientPacketHandler implements IMessageHandler<Message, IMessage> {
 
 		@Override
@@ -316,6 +428,12 @@ public class Scoring {
 					buf.readBytes(bytes);
 					String player = new String(bytes, UTF8);
 					long data = buf.readLong();
+					if (MinecraftServer.getServer() == null) {
+						score.put(player, data);
+					}
+					break;
+				case 3:
+					clientDraw = buf.readLong() != 0;
 					break;
 				case 0:
 					playerScore = buf.readLong();
@@ -336,6 +454,7 @@ public class Scoring {
 					buf.writeBytes(player);
 				case 0:
 				case 1:
+				case 3:
 					buf.writeLong(data);
 				}
 			}
