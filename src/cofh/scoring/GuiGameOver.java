@@ -26,7 +26,7 @@ public class GuiGameOver extends net.minecraft.client.gui.GuiGameOver {
 
 		this.buttonList.clear();
 
-		if (this.mc.theWorld.getWorldInfo().isHardcoreModeEnabled()) {
+		if (!Scoring.complete && this.mc.theWorld.getWorldInfo().isHardcoreModeEnabled()) {
 			if (this.mc.isIntegratedServerRunning()) {
 				this.buttonList.add(new GuiButton(1, this.width / 2 - 100, this.height / 4 + 96, I18n.format(
 					"deathScreen.deleteWorld", new Object[0])));
@@ -95,16 +95,15 @@ public class GuiGameOver extends net.minecraft.client.gui.GuiGameOver {
 		super.drawGradientRect(0, 0, this.width, this.height, 1615855616, -1602211792);
 		GL11.glPushMatrix();
 		GL11.glScalef(2.0F, 2.0F, 2.0F);
-		boolean flag = this.mc.theWorld.getWorldInfo().isHardcoreModeEnabled();
-		String s = flag ? I18n.format("deathScreen.title.hardcore", new Object[0]) : I18n.format("deathScreen.title",
-			new Object[0]);
+		boolean flag = !Scoring.complete && this.mc.theWorld.getWorldInfo().isHardcoreModeEnabled();
+		String s = Scoring.complete || flag ? I18n.format("deathScreen.title.hardcore", new Object[0]) : I18n.format(
+			"deathScreen.title", new Object[0]);
 		super.drawCenteredString(this.fontRendererObj, s, this.width / 2 / 2, 30, 16777215);
 		GL11.glPopMatrix();
 
 		if (flag) {
 			super.drawCenteredString(this.fontRendererObj, I18n.format("deathScreen.hardcoreInfo", new Object[0]),
-				this.width / 2,
-				144, 16777215);
+				this.width / 2, 144, 16777215);
 		}
 
 		super.drawCenteredString(this.fontRendererObj, I18n.format("deathScreen.score", new Object[0]) + ": " +
