@@ -38,6 +38,7 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.config.ConfigCategory;
 import net.minecraftforge.common.config.Configuration;
 import net.minecraftforge.common.config.Property;
+import net.minecraftforge.event.entity.item.ItemExpireEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.player.PlayerDestroyItemEvent;
 
@@ -149,6 +150,17 @@ public class Scoring {
 		if (evt.original != null) {
 			long value = values.get(evt.original.getItem());
 			score.adjustOrPutValue(evt.entityPlayer.getCommandSenderName(), value, value);
+		}
+	}
+
+	@SubscribeEvent(priority=EventPriority.LOWEST)
+	public void itemExpire(ItemExpireEvent evt) {
+
+		EntityItem ent = evt.entityItem;
+		String name = ent.func_145800_j();
+		if (name != null) {
+			long value = Math.min(0, values.get(ent.getEntityItem().getItem()) * ent.getEntityItem().stackSize);
+			score.adjustOrPutValue(name, value, value);
 		}
 	}
 
