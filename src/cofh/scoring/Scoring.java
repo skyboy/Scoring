@@ -68,7 +68,7 @@ import net.minecraftforge.event.entity.player.PlayerDestroyItemEvent;
 import org.apache.logging.log4j.Logger;
 import org.lwjgl.opengl.GL11;
 
-@Mod(modid = "CoFHScoring", name = "Scoring", version = "0.0.1.0", dependencies = "")
+@Mod(modid = "CoFHScoring", name = "Scoring", version = "1.0.0.0", dependencies = "")
 public class Scoring {
 
 	private static String sep = System.getProperty("line.separator");
@@ -85,6 +85,12 @@ public class Scoring {
 	Configuration config;
 	File scoreData;
 	SimpleNetworkWrapper networkWrapper;
+
+	static boolean isServerRunning() {
+
+		MinecraftServer server = MinecraftServer.getServer();
+		return server != null && !server.isServerStopped();
+	}
 
 	static long calculateScore(String name) {
 
@@ -211,13 +217,15 @@ public class Scoring {
 	@SubscribeEvent
 	public void playerLoggedIn(PlayerLoggedInEvent evt) {
 
+		if (!isServerRunning())
+			return;
 		EntityPlayerMP player = (EntityPlayerMP) evt.player;
 		networkWrapper.sendTo(new Message(1, complete ? 1 : 0), player);
 		networkWrapper.sendTo(new Message(3, drawInList ? 1 : 0), player);
 		score.putIfAbsent(player.getCommandSenderName(), 0);
 		if (drawInList) {
 			for (String k : score.keySet()) {
-				networkWrapper.sendTo(new Message(2, k, score.get(k)), player);
+				networkWrapper.sendTo(new Message(2, k, calculateScore(k)), player);
 			}
 		}
 	}
@@ -225,12 +233,14 @@ public class Scoring {
 	@SubscribeEvent
 	public void serverTick(ServerTickEvent evt) {
 
+		if (!isServerRunning())
+			return;
 		if (!complete && evt.phase == Phase.END)
 			if (++serverTickTime % 900 == 0)
 				serverStopped(null);
-			else if (drawInList && serverTickTime % (20 * 7) == 0)
+			else if (drawInList && (serverTickTime % (20 * 7)) == 0)
 				for (String k : score.keySet()) {
-					long data = score.get(k);
+					long data = calculateScore(k);
 					if (scoreCache.put(k, data) != data) {
 						sendPlayersMessage(new Message(2, k, data));
 					}
@@ -238,14 +248,17 @@ public class Scoring {
 	}
 
 	private void sendPlayersMessage(Message msg) {
+
 		for (EntityPlayerMP player : (List<EntityPlayerMP>) MinecraftServer.getServer().getConfigurationManager().playerEntityList) {
 			networkWrapper.sendTo(msg, player);
 		}
 	}
 
 	@SubscribeEvent(priority = EventPriority.LOWEST)
-	public void stopEquipment(LivingDeathEvent evt) {
+	public void onEntityDeath(LivingDeathEvent evt) {
 
+		if (!isServerRunning())
+			return;
 		if (evt.entity instanceof EntityPlayerMP) {
 			networkWrapper.sendTo(new Message(0, calculateScore(evt.entity.getCommandSenderName())), (EntityPlayerMP) evt.entity);
 			return;
@@ -258,7 +271,7 @@ public class Scoring {
 			String winnerName = winner.getCommandSenderName();
 			ScorePlayerTeam team = winner.getWorldScoreboard().getPlayersTeam(winnerName);
 			if (team != null) {
-				for (String s : (Collection<String>)team.getMembershipCollection()) {
+				for (String s : (Collection<String>) team.getMembershipCollection()) {
 					score.adjustValue(s, score.get(s));
 				}
 			} else {
@@ -277,6 +290,8 @@ public class Scoring {
 	@SubscribeEvent
 	public void itemBroken(PlayerDestroyItemEvent evt) {
 
+		if (!isServerRunning())
+			return;
 		if (!complete && evt.original != null) {
 			long value = values.get(evt.original.getItem());
 			score.adjustOrPutValue(evt.entityPlayer.getCommandSenderName(), value, value);
@@ -286,6 +301,8 @@ public class Scoring {
 	@SubscribeEvent(priority = EventPriority.LOWEST)
 	public void itemExpire(ItemExpireEvent evt) {
 
+		if (!isServerRunning())
+			return;
 		EntityItem ent = evt.entityItem;
 		String name = ent.func_145800_j();
 		if (!complete && name != null) {
@@ -296,6 +313,8 @@ public class Scoring {
 
 	public static void itemDeath(EntityItem ent, DamageSource damage) {
 
+		if (!isServerRunning())
+			return;
 		String name = ent.func_145800_j();
 		if (!complete && name != null) {
 			long value = values.get(ent.getEntityItem().getItem()) * ent.getEntityItem().stackSize;
@@ -364,8 +383,9 @@ public class Scoring {
 					int maxX = xPos + columnWidth - 12 - 5;
 
 					if (maxX - endX > 5) {
-						String scoreDisplay = EnumChatFormatting.YELLOW + "" + score.get(player.name);
-						mc.fontRenderer.drawStringWithShadow(scoreDisplay, maxX - mc.fontRenderer.getStringWidth(scoreDisplay), yPos, 16777215);
+						String scoreDisplay = EnumChatFormatting.YELLOW + "" + scoreCache.get(player.name);
+						mc.fontRenderer.drawStringWithShadow(scoreDisplay, maxX - mc.fontRenderer.getStringWidth(scoreDisplay),
+							yPos, 16777215);
 					}
 
 					GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
@@ -373,10 +393,14 @@ public class Scoring {
 					mc.getTextureManager().bindTexture(Gui.icons);
 					int pingIndex = 4;
 					int ping = player.responseTime;
-					if (ping < 0) pingIndex = 5;
-					else if (ping < 150) pingIndex = 0;
-					else if (ping < 300) pingIndex = 1;
-					else if (ping < 600) pingIndex = 2;
+					if (ping < 0)
+						pingIndex = 5;
+					else if (ping < 150)
+						pingIndex = 0;
+					else if (ping < 300)
+						pingIndex = 1;
+					else if (ping < 600)
+						pingIndex = 2;
 					else if (ping < 1000) pingIndex = 3;
 
 					gui.zLevel += 100.0F;
@@ -428,8 +452,8 @@ public class Scoring {
 					buf.readBytes(bytes);
 					String player = new String(bytes, UTF8);
 					long data = buf.readLong();
-					if (MinecraftServer.getServer() == null) {
-						score.put(player, data);
+					if (!isServerRunning()) {
+						scoreCache.put(player, data);
 					}
 					break;
 				case 3:
