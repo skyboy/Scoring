@@ -78,6 +78,7 @@ public class Scoring {
 	static TObjectLongHashMap<Item> values = new TObjectLongHashMap<Item>(8, 0.5f, 0L);
 	static ArrayList<String> bossEntities = new ArrayList<String>();
 	static long serverTickTime, timeMod;
+	static boolean difficultyScale;
 	static boolean complete;
 	static boolean drawInList, clientDraw;
 	static boolean pointsOnDestroy;
@@ -96,9 +97,14 @@ public class Scoring {
 
 	static long calculateScore(String name) {
 
+		int scale = 1;
+		if (difficultyScale) {
+			scale = MinecraftServer.getServer().func_147135_j().getDifficultyId();
+			scale &= ~scale >> 32;
+		}
 		long v = score.get(name);
 		long time = timeMod <= 0 ? 0 : serverTickTime / timeMod;
-		return v - time;
+		return v - (time * scale);
 	}
 
 	@EventHandler
@@ -109,6 +115,7 @@ public class Scoring {
 
 		String comment = "1 point is subtracted from a player's score every this many ticks (default: 10 minutes (20*60*10))";
 		timeMod = config.get("general", "TimeCost", 20 * 60 * 10, comment + ". 0 disables.").getInt() & 0xFFFFFFFFL;
+		difficultyScale = config.get("general", "TimeCostScale", false, "Scale TimeCost based on server difficulty").getBoolean();
 
 		drawInList = config.get("general", "DrawScoreInPlayerList", true).getBoolean();
 		pointsOnBreak = config.get("general", "PointsOnBreak", true, "Receive half points for breaking items").getBoolean();
