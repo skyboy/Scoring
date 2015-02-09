@@ -114,7 +114,7 @@ public class Scoring {
 		pointsOnBreak = config.get("general", "PointsOnBreak", true, "Receive half points for breaking items").getBoolean();
 		pointsOnDestroy = config.get("general", "PointsOnDestroy", true, "Receive points for destroying items").getBoolean();
 		pointsOnExpire = config.get("general", "PointsOnExpire", true, "Receive points when items expire").getBoolean();
-		negativeOnly = config.get("general", "NegativeOnExpire", true, "Receive only points when items expire. " +
+		negativeOnly = config.get("general", "NegativeOnExpire", true, "Receive only points when items expire or break. " +
 				"Items with positive point values will not be counted").getBoolean();
 
 		networkWrapper = new SimpleNetworkWrapper("CoFH|Scoring");
@@ -300,7 +300,8 @@ public class Scoring {
 		if (!pointsOnBreak || !isServerRunning())
 			return;
 		if (!complete && evt.original != null) {
-			long value = values.get(evt.original.getItem()) / 2;
+			long value = negativeOnly ? 0 : Long.MAX_VALUE;
+			value = Math.min(value, values.get(evt.original.getItem()) / 2);
 			score.adjustOrPutValue(evt.entityPlayer.getCommandSenderName(), value, value);
 		}
 	}
