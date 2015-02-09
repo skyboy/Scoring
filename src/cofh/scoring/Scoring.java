@@ -80,6 +80,8 @@ public class Scoring {
 	static long serverTickTime, timeMod;
 	static boolean complete;
 	static boolean drawInList, clientDraw;
+	static boolean pointsOnDestroy;
+	boolean pointsOnBreak, pointsOnExpire, negativeOnly;
 	static ScoreObjective dummyObjective;
 	Logger log;
 	Configuration config;
@@ -109,6 +111,11 @@ public class Scoring {
 		timeMod = config.get("general", "TimeCost", 20 * 60 * 10, comment + ". 0 disables.").getInt() & 0xFFFFFFFFL;
 
 		drawInList = config.get("general", "DrawScoreInPlayerList", true).getBoolean();
+		pointsOnBreak = config.get("general", "PointsOnBreak", true, "Receive half points for breaking items").getBoolean();
+		pointsOnDestroy = config.get("general", "PointsOnDestroy", true, "Receive points for destroying items").getBoolean();
+		pointsOnExpire = config.get("general", "PointsOnExpire", true, "Receive points when items expire").getBoolean();
+		negativeOnly = config.get("general", "NegativeOnExpire", true, "Receive only points when items expire. " +
+				"Items with positive point values will not be counted").getBoolean();
 
 		networkWrapper = new SimpleNetworkWrapper("CoFH|Scoring");
 		networkWrapper.registerMessage(ClientPacketHandler.class, Message.class, 0, Side.CLIENT);
@@ -290,10 +297,10 @@ public class Scoring {
 	@SubscribeEvent
 	public void itemBroken(PlayerDestroyItemEvent evt) {
 
-		if (!isServerRunning())
+		if (!pointsOnBreak || !isServerRunning())
 			return;
 		if (!complete && evt.original != null) {
-			long value = values.get(evt.original.getItem());
+			long value = values.get(evt.original.getItem()) / 2;
 			score.adjustOrPutValue(evt.entityPlayer.getCommandSenderName(), value, value);
 		}
 	}
@@ -301,19 +308,20 @@ public class Scoring {
 	@SubscribeEvent(priority = EventPriority.LOWEST)
 	public void itemExpire(ItemExpireEvent evt) {
 
-		if (!isServerRunning())
+		if (!pointsOnExpire || !isServerRunning())
 			return;
 		EntityItem ent = evt.entityItem;
 		String name = ent.func_145800_j();
 		if (!complete && name != null) {
-			long value = Math.min(0, values.get(ent.getEntityItem().getItem()) * ent.getEntityItem().stackSize);
+			long value = negativeOnly ? 0 : Long.MAX_VALUE;
+			value = Math.min(value, values.get(ent.getEntityItem().getItem()) * ent.getEntityItem().stackSize);
 			score.adjustOrPutValue(name, value, value);
 		}
 	}
 
 	public static void itemDeath(EntityItem ent, DamageSource damage) {
 
-		if (!isServerRunning())
+		if (!pointsOnDestroy || !isServerRunning())
 			return;
 		String name = ent.func_145800_j();
 		if (!complete && name != null) {
