@@ -28,7 +28,7 @@ public class GuiGameOver extends net.minecraft.client.gui.GuiGameOver {
 
 		if (!Scoring.complete && this.mc.theWorld.getWorldInfo().isHardcoreModeEnabled()) {
 			if (this.mc.isIntegratedServerRunning()) {
-				this.buttonList.add(new GuiButton(1, this.width / 2 - 100, this.height / 4 + 96, I18n.format(
+				this.buttonList.add(new GuiButton(2, this.width / 2 - 100, this.height / 4 + 96, I18n.format(
 					"deathScreen.deleteWorld", new Object[0])));
 			}
 			else {
@@ -63,6 +63,10 @@ public class GuiGameOver extends net.minecraft.client.gui.GuiGameOver {
 	protected void actionPerformed(GuiButton p_146284_1_) {
 
 		switch (p_146284_1_.id) {
+		case 2:
+			this.mc.thePlayer.respawnPlayer();
+			this.mc.displayGuiScreen(new GuiMainMenu());
+			break;
 		case 0:
 			this.mc.thePlayer.respawnPlayer();
 			this.mc.displayGuiScreen((GuiScreen) null);
