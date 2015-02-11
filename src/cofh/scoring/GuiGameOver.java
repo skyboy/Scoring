@@ -19,6 +19,8 @@ import org.lwjgl.opengl.GL11;
 @SideOnly(Side.CLIENT)
 public class GuiGameOver extends net.minecraft.client.gui.GuiGameOver {
 
+	public static boolean respawnOnly = false;
+
 	private int field_146347_a;
 
 	@Override
@@ -26,7 +28,7 @@ public class GuiGameOver extends net.minecraft.client.gui.GuiGameOver {
 
 		this.buttonList.clear();
 
-		if (!Scoring.complete && this.mc.theWorld.getWorldInfo().isHardcoreModeEnabled()) {
+		l: if (!respawnOnly && this.mc.theWorld.getWorldInfo().isHardcoreModeEnabled()) {
 			if (this.mc.isIntegratedServerRunning()) {
 				this.buttonList.add(new GuiButton(2, this.width / 2 - 100, this.height / 4 + 96, I18n.format(
 					"deathScreen.deleteWorld", new Object[0])));
@@ -39,12 +41,10 @@ public class GuiGameOver extends net.minecraft.client.gui.GuiGameOver {
 		else {
 			this.buttonList.add(new GuiButton(0, this.width / 2 - 100, this.height / 4 + 72, I18n.format("deathScreen.respawn",
 				new Object[0])));
+			if (respawnOnly)
+				break l;
 			this.buttonList.add(new GuiButton(1, this.width / 2 - 100, this.height / 4 + 96, I18n.format(
 				"deathScreen.titleScreen", new Object[0])));
-
-			if (this.mc.getSession() == null) {
-				((GuiButton) this.buttonList.get(1)).enabled = false;
-			}
 		}
 
 		GuiButton guibutton;
@@ -62,6 +62,7 @@ public class GuiGameOver extends net.minecraft.client.gui.GuiGameOver {
 	@Override
 	protected void actionPerformed(GuiButton p_146284_1_) {
 
+		respawnOnly = false;
 		switch (p_146284_1_.id) {
 		case 2:
 			this.mc.thePlayer.respawnPlayer();
@@ -99,13 +100,13 @@ public class GuiGameOver extends net.minecraft.client.gui.GuiGameOver {
 		super.drawGradientRect(0, 0, this.width, this.height, 1615855616, -1602211792);
 		GL11.glPushMatrix();
 		GL11.glScalef(2.0F, 2.0F, 2.0F);
-		boolean flag = !Scoring.complete && this.mc.theWorld.getWorldInfo().isHardcoreModeEnabled();
+		boolean flag = this.mc.theWorld.getWorldInfo().isHardcoreModeEnabled();
 		String s = Scoring.complete || flag ? I18n.format("deathScreen.title.hardcore", new Object[0]) : I18n.format(
 			"deathScreen.title", new Object[0]);
 		super.drawCenteredString(this.fontRendererObj, s, this.width / 2 / 2, 30, 16777215);
 		GL11.glPopMatrix();
 
-		if (flag) {
+		if (flag && !respawnOnly) {
 			super.drawCenteredString(this.fontRendererObj, I18n.format("deathScreen.hardcoreInfo", new Object[0]),
 				this.width / 2, 144, 16777215);
 		}
@@ -134,6 +135,8 @@ public class GuiGameOver extends net.minecraft.client.gui.GuiGameOver {
 	@Override
 	public void updateScreen() {
 
+		if (this.mc.thePlayer.getHealth() > 0)
+			this.mc.displayGuiScreen(null);
 		super.updateScreen();
 		++this.field_146347_a;
 		GuiButton guibutton;

@@ -11,6 +11,7 @@ import cpw.mods.fml.common.event.FMLServerStoppedEvent;
 import cpw.mods.fml.common.eventhandler.EventPriority;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.PlayerEvent.PlayerLoggedInEvent;
+import cpw.mods.fml.common.gameevent.PlayerEvent.PlayerRespawnEvent;
 import cpw.mods.fml.common.gameevent.TickEvent.Phase;
 import cpw.mods.fml.common.gameevent.TickEvent.ServerTickEvent;
 import cpw.mods.fml.common.network.simpleimpl.IMessage;
@@ -43,8 +44,10 @@ import net.minecraft.client.gui.GuiPlayerInfo;
 import net.minecraft.client.network.NetHandlerPlayClient;
 import net.minecraft.entity.EntityList;
 import net.minecraft.entity.item.EntityItem;
+import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.item.Item;
+import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.scoreboard.ScoreDummyCriteria;
 import net.minecraft.scoreboard.ScoreObjective;
 import net.minecraft.scoreboard.ScorePlayerTeam;
@@ -93,9 +96,9 @@ public class Scoring {
 	static void playFirework() {
 
 		String s1 = "fireworks." + "largeBlast";
-        Minecraft.getMinecraft().thePlayer.playSound(s1, 20.0F, .8F);
+		Minecraft.getMinecraft().thePlayer.playSound(s1, 20.0F, .8F);
 		s1 = "fireworks." + "twinkle";
-        Minecraft.getMinecraft().thePlayer.playSound(s1, 20.0F, .95F);
+		Minecraft.getMinecraft().thePlayer.playSound(s1, 20.0F, .95F);
 	}
 
 	static boolean isServerRunning() {
@@ -105,6 +108,7 @@ public class Scoring {
 	}
 
 	private List<EntityPlayerMP> getPlayers() {
+
 		return MinecraftServer.getServer().getConfigurationManager().playerEntityList;
 	}
 
@@ -315,8 +319,8 @@ public class Scoring {
 			EntityPlayerMP winner = (EntityPlayerMP) src.getEntity();
 			if (killedBossEntities.contains(ent)) {
 				String s1 = "random.fizz";
-		        winner.worldObj.playSoundAtEntity(winner, s1, 20.0F, .35F);
-		        winner.worldObj.playSoundAtEntity(winner, s1, 20.0F, .35F);
+				winner.worldObj.playSoundAtEntity(winner, s1, 20.0F, .35F);
+				winner.worldObj.playSoundAtEntity(winner, s1, 20.0F, .35F);
 				return;
 			}
 			killedBossEntities.add(ent);
@@ -334,13 +338,30 @@ public class Scoring {
 				for (EntityPlayerMP player : getPlayers()) {
 					networkWrapper.sendTo(new Message(1, 1), player);
 					networkWrapper.sendTo(new Message(99, 1), player);
+					networkWrapper.sendTo(new Message(98, 1), player);
 					player.addStat(StatList.deathsStat, -1);
+					player.playerConqueredTheEnd = true;
+					NBTTagCompound tag = player.getEntityData().getCompoundTag(EntityPlayer.PERSISTED_NBT_TAG);
+					tag.setFloat("score|H", player.getHealth());
+					player.getEntityData().setTag(EntityPlayer.PERSISTED_NBT_TAG, tag);
 					player.setHealth(0);
 					player.onDeath(DamageSource.generic);
 				}
 			} else {
 				sendPlayersMessage(new Message(99, 1));
 			}
+		}
+	}
+
+	@SubscribeEvent
+	public void respawn(PlayerRespawnEvent evt) {
+
+		if (!isServerRunning())
+			return;
+		NBTTagCompound tag = evt.player.getEntityData().getCompoundTag(EntityPlayer.PERSISTED_NBT_TAG);
+		if (tag.hasKey("score|H")) {
+			evt.player.setHealth(tag.getFloat("score|H"));
+			tag.removeTag("score|H");
 		}
 	}
 
@@ -525,7 +546,10 @@ public class Scoring {
 					complete = buf.readLong() != 0;
 					break;
 				case 99:
-		            playFirework();
+					playFirework();
+					break;
+				case 98:
+					cofh.scoring.GuiGameOver.respawnOnly = true;
 				}
 			}
 
