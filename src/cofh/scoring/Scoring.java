@@ -43,7 +43,6 @@ import net.minecraft.client.gui.GuiPlayerInfo;
 import net.minecraft.client.network.NetHandlerPlayClient;
 import net.minecraft.entity.EntityList;
 import net.minecraft.entity.item.EntityItem;
-import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.item.Item;
 import net.minecraft.scoreboard.ScoreDummyCriteria;
@@ -76,7 +75,9 @@ public class Scoring {
 	static TObjectLongHashMap<String> score = new TObjectLongHashMap<String>();
 	static TObjectLongHashMap<String> scoreCache = new TObjectLongHashMap<String>();
 	static TObjectLongHashMap<Item> values = new TObjectLongHashMap<Item>(8, 0.5f, 0L);
+	static ArrayList<String> endingEntities = new ArrayList<String>();
 	static ArrayList<String> bossEntities = new ArrayList<String>();
+	static ArrayList<String> killedBossEntities = new ArrayList<String>();
 	static long serverTickTime, timeMod;
 	static boolean difficultyScale;
 	static boolean complete;
@@ -89,10 +90,22 @@ public class Scoring {
 	File scoreData;
 	SimpleNetworkWrapper networkWrapper;
 
+	static void playFirework() {
+
+		String s1 = "fireworks." + "largeBlast";
+        Minecraft.getMinecraft().thePlayer.playSound(s1, 20.0F, .8F);
+		s1 = "fireworks." + "twinkle";
+        Minecraft.getMinecraft().thePlayer.playSound(s1, 20.0F, .95F);
+	}
+
 	static boolean isServerRunning() {
 
 		MinecraftServer server = MinecraftServer.getServer();
 		return server != null && !server.isServerStopped();
+	}
+
+	private List<EntityPlayerMP> getPlayers() {
+		return MinecraftServer.getServer().getConfigurationManager().playerEntityList;
 	}
 
 	static long calculateScore(String name) {
@@ -146,8 +159,12 @@ public class Scoring {
 				log.warn("item_values entry %s not found", e.getKey());
 		}
 
-		String c = "A list of entity IDs that when killed will end this round of scoring.";
+		String c = "A list of entity IDs that when killed will double score and end this round of scoring.";
 		for (String a : config.get("general", "RoundEnders", new String[] { "EnderDragon" }, c).getStringList()) {
+			endingEntities.add(a);
+		}
+		c = "A list of entity IDs that when killed will double score for the first killed.";
+		for (String a : config.get("general", "Bosses", new String[] { "WitherBoss" }, c).getStringList()) {
 			bossEntities.add(a);
 		}
 		config.save();
@@ -181,6 +198,9 @@ public class Scoring {
 					case 2:
 						serverTickTime = Long.parseLong(data.substring(1), 36);
 						break;
+					case 24:
+						killedBossEntities.add(data.substring(1));
+						break;
 					default:
 					}
 				}
@@ -212,6 +232,13 @@ public class Scoring {
 					writer.write(user);
 					writer.write('=');
 					writer.write(Long.toHexString(score.get(user)));
+					writer.write(sep);
+					if ((++i & 15) == 0)
+						writer.flush();
+				}
+				for (String s : killedBossEntities) {
+					writer.write(24);
+					writer.write(s);
 					writer.write(sep);
 					if ((++i & 15) == 0)
 						writer.flush();
@@ -263,7 +290,7 @@ public class Scoring {
 
 	private void sendPlayersMessage(Message msg) {
 
-		for (EntityPlayerMP player : (List<EntityPlayerMP>) MinecraftServer.getServer().getConfigurationManager().playerEntityList) {
+		for (EntityPlayerMP player : getPlayers()) {
 			networkWrapper.sendTo(msg, player);
 		}
 	}
@@ -277,11 +304,22 @@ public class Scoring {
 			networkWrapper.sendTo(new Message(0, calculateScore(evt.entity.getCommandSenderName())), (EntityPlayerMP) evt.entity);
 			return;
 		}
+		if (complete)
+			return;
 		DamageSource src = evt.source;
-		if (!complete && src != null && src.getEntity() instanceof EntityPlayer && src.getEntity().addedToChunk &&
-				bossEntities.contains(EntityList.getEntityString(evt.entity))) {
-			complete = true;
-			EntityPlayer winner = (EntityPlayer) src.getEntity();
+		if (src != null && src.getEntity() instanceof EntityPlayerMP && src.getEntity().addedToChunk) {
+			String ent = EntityList.getEntityString(evt.entity);
+			complete |= endingEntities.contains(ent);
+			if (!complete && !bossEntities.contains(ent))
+				return;
+			EntityPlayerMP winner = (EntityPlayerMP) src.getEntity();
+			if (killedBossEntities.contains(ent)) {
+				String s1 = "random.fizz";
+		        winner.worldObj.playSoundAtEntity(winner, s1, 20.0F, .35F);
+		        winner.worldObj.playSoundAtEntity(winner, s1, 20.0F, .35F);
+				return;
+			}
+			killedBossEntities.add(ent);
 			String winnerName = winner.getCommandSenderName();
 			ScorePlayerTeam team = winner.getWorldScoreboard().getPlayersTeam(winnerName);
 			if (team != null) {
@@ -292,11 +330,16 @@ public class Scoring {
 				score.adjustValue(winnerName, score.get(winnerName));
 			}
 			serverStopped(null);
-			for (EntityPlayer player : (List<EntityPlayer>) MinecraftServer.getServer().getConfigurationManager().playerEntityList) {
-				networkWrapper.sendTo(new Message(1, 1), (EntityPlayerMP) player);
-				player.addStat(StatList.deathsStat, -1);
-				player.setHealth(0);
-				player.onDeath(DamageSource.generic);
+			if (complete) {
+				for (EntityPlayerMP player : getPlayers()) {
+					networkWrapper.sendTo(new Message(1, 1), player);
+					networkWrapper.sendTo(new Message(99, 1), player);
+					player.addStat(StatList.deathsStat, -1);
+					player.setHealth(0);
+					player.onDeath(DamageSource.generic);
+				}
+			} else {
+				sendPlayersMessage(new Message(99, 1));
 			}
 		}
 	}
@@ -481,6 +524,8 @@ public class Scoring {
 				case 1:
 					complete = buf.readLong() != 0;
 					break;
+				case 99:
+		            playFirework();
 				}
 			}
 
@@ -496,6 +541,8 @@ public class Scoring {
 				case 1:
 				case 3:
 					buf.writeLong(data);
+					break;
+				default:
 				}
 			}
 		}
