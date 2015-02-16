@@ -180,8 +180,8 @@ public class Scoring {
 				String key = e.getKey();
 				int meta = -1;
 				if (key.indexOf('#') > 0) {
-					meta = Integer.parseInt(key.substring(key.indexOf('#') + 1));
-					key = key.substring(0, key.indexOf('#'));
+					meta = Integer.parseInt(key.substring(key.lastIndexOf('#') + 1));
+					key = key.substring(0, key.lastIndexOf('#'));
 				}
 				Block item = GameData.getBlockRegistry().getObject(key);
 				if (item != Blocks.air)
