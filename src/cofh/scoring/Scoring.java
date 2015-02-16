@@ -36,6 +36,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map.Entry;
 
+import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGameOver;
@@ -46,6 +47,7 @@ import net.minecraft.entity.EntityList;
 import net.minecraft.entity.item.EntityItem;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.init.Blocks;
 import net.minecraft.item.Item;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.scoreboard.ScoreDummyCriteria;
@@ -66,6 +68,7 @@ import net.minecraftforge.common.config.Property;
 import net.minecraftforge.event.entity.item.ItemExpireEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.player.PlayerDestroyItemEvent;
+import net.minecraftforge.event.world.BlockEvent.BreakEvent;
 
 import org.apache.logging.log4j.Logger;
 import org.lwjgl.opengl.GL11;
@@ -76,8 +79,10 @@ public class Scoring {
 	private static String sep = System.getProperty("line.separator");
 	public static long playerScore = 0;
 	static TObjectLongHashMap<String> score = new TObjectLongHashMap<String>();
-	static TObjectLongHashMap<String> scoreCache = new TObjectLongHashMap<String>();
-	static TObjectLongHashMap<Item> values = new TObjectLongHashMap<Item>(8, 0.5f, 0L);
+	static TObjectLongHashMap<String> scoreCache = new TObjectLongHashMap<String>(8, 0.5f, 0L);
+	static TObjectLongHashMap<Item> itemValues = new TObjectLongHashMap<Item>(8, 0.5f, 0L);
+	static TObjectLongHashMap<BlockWrapper> blockValues = new TObjectLongHashMap<BlockWrapper>(8, 0.5f, 0L);
+	static TObjectLongHashMap<String> entities = new TObjectLongHashMap<String>(8, 0.5f, 0L);
 	static ArrayList<String> endingEntities = new ArrayList<String>();
 	static ArrayList<String> bossEntities = new ArrayList<String>();
 	static ArrayList<String> killedBossEntities = new ArrayList<String>();
@@ -148,29 +153,70 @@ public class Scoring {
 	@EventHandler
 	public void loadComplete(FMLLoadCompleteEvent event) {
 
-		config.get("item_values", "iron_block", config.get("item_values", "iron_ingot", 5).getInt() * 9);
-		config.get("item_values", "gold_block", config.get("item_values", "gold_ingot", 2).getInt() * 9);
-		config.get("item_values", "emerald_block", config.get("item_values", "emerald", 1).getInt() * 9);
+		{
+			config.get("item_values", "iron_block", config.get("item_values", "iron_ingot", 5).getInt() * 9);
+			config.get("item_values", "gold_block", config.get("item_values", "gold_ingot", 2).getInt() * 9);
+			config.get("item_values", "emerald_block", config.get("item_values", "emerald", 1).getInt() * 9);
 
-		ConfigCategory droplist = config.getCategory("item_values");
-		droplist.setComment("Entries in this category are used to give players points for destroying them\n\n" +
-				"Format: I:\"<item name>\" = value");
-		for (Entry<String, Property> e : droplist.entrySet()) {
-			Item item = GameData.getItemRegistry().getObject(e.getKey());
-			if (item != null)
-				values.put(item, e.getValue().getInt());
-			else
-				log.warn("item_values entry %s not found", e.getKey());
+			ConfigCategory droplist = config.getCategory("item_values");
+			droplist.setComment("Entries in this category are used to give players points for destroying them\n\n" +
+					"Format: I:\"<item name>\" = value");
+			for (Entry<String, Property> e : droplist.entrySet()) {
+				Item item = GameData.getItemRegistry().getObject(e.getKey());
+				if (item != null)
+					itemValues.put(item, e.getValue().getInt());
+				else
+					log.warn("item_values entry %s not found", e.getKey());
+			}
+		}
+
+		{
+			config.get("block_values", "mob_spawner", 0);
+
+			ConfigCategory droplist = config.getCategory("block_values");
+			droplist.setComment("Entries in this category are used to give players points for destroying them\n\n" +
+					"Format: I:\"<block name>\" = value");
+			for (Entry<String, Property> e : droplist.entrySet()) {
+				String key = e.getKey();
+				int meta = -1;
+				if (key.indexOf('#') > 0) {
+					meta = Integer.parseInt(key.substring(key.indexOf('#') + 1));
+					key = key.substring(0, key.indexOf('#'));
+				}
+				Block item = GameData.getBlockRegistry().getObject(key);
+				if (item != Blocks.air)
+					blockValues.put(new BlockWrapper(item, meta), e.getValue().getInt());
+				else
+					log.warn("block_values entry %s not found", key);
+			}
+		}
+
+		{
+			config.get("entity_values", "EnderDragon", 0);
+			config.get("entity_values", "WitherBoss", 0);
+
+			ConfigCategory droplist = config.getCategory("entity_values");
+			droplist.setComment("Entries in this category are used to give players points for destroying them\n\n" +
+					"Format: I:\"<entity name>\" = value");
+			for (Entry<String, Property> e : droplist.entrySet()) {
+				Object item = EntityList.stringToClassMapping.get(e.getKey());
+				if (item != null)
+					entities.put(e.getKey(), e.getValue().getInt());
+				else
+					log.warn("entity_values entry %s not found", e.getKey());
+			}
 		}
 
 		String c = "A list of entity IDs that when killed will double score and end this round of scoring.";
 		for (String a : config.get("general", "RoundEnders", new String[] { "EnderDragon" }, c).getStringList()) {
 			endingEntities.add(a);
 		}
+
 		c = "A list of entity IDs that when killed will double score for the first killed.";
 		for (String a : config.get("general", "Bosses", new String[] { "WitherBoss" }, c).getStringList()) {
 			bossEntities.add(a);
 		}
+
 		config.save();
 
 		if (FMLCommonHandler.instance().getSide() == Side.CLIENT) {
@@ -312,33 +358,48 @@ public class Scoring {
 			return;
 		DamageSource src = evt.source;
 		if (src != null && src.getEntity() instanceof EntityPlayerMP && src.getEntity().addedToChunk) {
+
 			String ent = EntityList.getEntityString(evt.entity);
+
+			long data = entities.get(ent);
+
 			complete |= endingEntities.contains(ent);
-			if (!complete && !bossEntities.contains(ent))
+			boolean boss = complete || bossEntities.contains(ent);
+			if (!boss && data == 0)
 				return;
+
 			EntityPlayerMP winner = (EntityPlayerMP) src.getEntity();
 			if (killedBossEntities.contains(ent)) {
 				String s1 = "random.fizz";
 				winner.worldObj.playSoundAtEntity(winner, s1, 20.0F, .35F);
 				winner.worldObj.playSoundAtEntity(winner, s1, 20.0F, .35F);
 				return;
-			}
-			killedBossEntities.add(ent);
+			} else if (boss)
+				killedBossEntities.add(ent);
+
 			String winnerName = winner.getCommandSenderName();
-			ScorePlayerTeam team = winner.getWorldScoreboard().getPlayersTeam(winnerName);
-			if (team != null) {
-				for (String s : (Collection<String>) team.getMembershipCollection()) {
-					score.adjustValue(s, score.get(s));
+			if (boss) {
+				ScorePlayerTeam team = winner.getWorldScoreboard().getPlayersTeam(winnerName);
+				if (team != null) {
+					for (String s : (Collection<String>) team.getMembershipCollection()) {
+						score.adjustValue(s, score.get(s));
+					}
+				} else {
+					score.adjustValue(winnerName, score.get(winnerName));
 				}
-			} else {
-				score.adjustValue(winnerName, score.get(winnerName));
 			}
+
+			if (data != 0)
+				score.adjustOrPutValue(winnerName, data, data);
+
 			serverStopped(null);
+
 			if (complete) {
 				for (EntityPlayerMP player : getPlayers()) {
 					networkWrapper.sendTo(new Message(1, 1), player);
 					networkWrapper.sendTo(new Message(99, 1), player);
 					networkWrapper.sendTo(new Message(98, 1), player);
+
 					player.addStat(StatList.deathsStat, -1);
 					player.playerConqueredTheEnd = true;
 					NBTTagCompound tag = player.getEntityData().getCompoundTag(EntityPlayer.PERSISTED_NBT_TAG);
@@ -347,7 +408,7 @@ public class Scoring {
 					player.setHealth(0);
 					player.onDeath(DamageSource.generic);
 				}
-			} else {
+			} else if (boss) {
 				sendPlayersMessage(new Message(99, 1));
 			}
 		}
@@ -366,13 +427,26 @@ public class Scoring {
 	}
 
 	@SubscribeEvent
+	public void blockBroken(BreakEvent evt) {
+
+		if (complete || !pointsOnDestroy || !isServerRunning())
+			return;
+		EntityPlayer player = evt.getPlayer();
+		if (player == null)
+			return;
+		BlockWrapper w = new BlockWrapper(evt.block, evt.blockMetadata);
+		long points = blockValues.containsKey(w) ? blockValues.get(w) : blockValues.get(new BlockWrapper(evt.block, -1));
+		score.adjustOrPutValue(player.getCommandSenderName(), points, points);
+	}
+
+	@SubscribeEvent
 	public void itemBroken(PlayerDestroyItemEvent evt) {
 
 		if (!pointsOnBreak || !isServerRunning())
 			return;
 		if (!complete && evt.original != null) {
 			long value = negativeOnly ? 0 : Long.MAX_VALUE;
-			value = Math.min(value, values.get(evt.original.getItem()) / 2);
+			value = Math.min(value, itemValues.get(evt.original.getItem()) / 2);
 			score.adjustOrPutValue(evt.entityPlayer.getCommandSenderName(), value, value);
 		}
 	}
@@ -386,7 +460,7 @@ public class Scoring {
 		String name = ent.func_145800_j();
 		if (!complete && name != null) {
 			long value = negativeOnly ? 0 : Long.MAX_VALUE;
-			value = Math.min(value, values.get(ent.getEntityItem().getItem()) * ent.getEntityItem().stackSize);
+			value = Math.min(value, itemValues.get(ent.getEntityItem().getItem()) * ent.getEntityItem().stackSize);
 			score.adjustOrPutValue(name, value, value);
 		}
 	}
@@ -397,7 +471,7 @@ public class Scoring {
 			return;
 		String name = ent.func_145800_j();
 		if (!complete && name != null) {
-			long value = values.get(ent.getEntityItem().getItem()) * ent.getEntityItem().stackSize;
+			long value = itemValues.get(ent.getEntityItem().getItem()) * ent.getEntityItem().stackSize;
 			score.adjustOrPutValue(name, value, value);
 		}
 		return;
@@ -571,6 +645,36 @@ public class Scoring {
 			}
 		}
 
+	}
+
+	private static class BlockWrapper {
+
+		public final Block block;
+		public final int metadata;
+
+		public BlockWrapper(Block block, int metadata) {
+
+			this.block = block;
+			this.metadata = metadata;
+		}
+
+		@Override
+		public int hashCode() {
+
+			return block.hashCode() ^ metadata;
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+
+			if (this == obj)
+				return true;
+			if (obj instanceof BlockWrapper) {
+				BlockWrapper o = (BlockWrapper) obj;
+				return o.metadata == metadata && o.block.delegate.get() == block.delegate.get();
+			}
+			return false;
+		}
 	}
 
 }
