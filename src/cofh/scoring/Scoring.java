@@ -73,12 +73,12 @@ import net.minecraftforge.event.world.BlockEvent.BreakEvent;
 import org.apache.logging.log4j.Logger;
 import org.lwjgl.opengl.GL11;
 
-@Mod(modid = "CoFHScoring", name = "Scoring", version = "1.0.0.0", dependencies = "")
+@Mod(modid = "CoFHScoring", name = "Scoring", version = "2.0.0.0", dependencies = "")
 public class Scoring {
 
 	private static String sep = System.getProperty("line.separator");
 	public static long playerScore = 0;
-	static TObjectLongHashMap<String> score = new TObjectLongHashMap<String>();
+	static TObjectLongHashMap<String> score = new TObjectLongHashMap<String>(8, 0.5f, 0L);
 	static TObjectLongHashMap<String> scoreCache = new TObjectLongHashMap<String>(8, 0.5f, 0L);
 	static TObjectLongHashMap<Item> itemValues = new TObjectLongHashMap<Item>(8, 0.5f, 0L);
 	static TObjectLongHashMap<BlockWrapper> blockValues = new TObjectLongHashMap<BlockWrapper>(8, 0.5f, 0L);
